@@ -1,0 +1,124 @@
+Ansible Playbook 
+- - -
+### Defining roles for app_servers
+name: Deploy Tomcat using Roles
+    hosts: app_servers
+    become: yes
+    roles: 
+       - app_server
+### Install JAVA that is required for TOMCAT and create a directory for it
+- name: Install and Start Application Server (Tomcat)
+  hosts: app_servers
+  become: yes
+  tasks:
+    - name: Install Java (Required for Tomcat)
+      ansible.builtin.apt:
+        name: openjdk-11-jdk
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Ensure Tomcat installation directory exists
+      ansible.builtin.file:
+        path: “{{ tomcat_install_dir }}”
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+### TOMCAT DOWNLOAD & EXTRACTION 
+    - name: Download Tomcat
+      ansible.builtin.get_url:
+        url: "https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.102/bin/apache-tomcat-9.0.102.tar.gz"
+        dest: /tmp/apache-tomcat.tar.gz
+        mode: “0644"
+ - name: Extract Tomcat
+      ansible.builtin.unarchive:
+        src: "/tmp/apache-tomcat.tar.gz"
+        dest: "{{ tomcat_install_dir }}"
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+        mode: “0755”
+
+  - name: Enable and start Tomcat service
+      ansible.builtin.systemd:
+        name: tomcat
+        state: started
+        enabled: yes
+    - name: Start Tomcat server
+      ansible.builtin.command: /opt/tomcat/bin/startup.sh
+      args:
+        chdir: /opt/tomcat
+      async: 45
+      poll: 0
+roles/app_server/tasks/main.yml
+roles/app_server/vars/main.yml
+roles/app_server/templates/tomcat.service.j2
+roles/app_server/handlers/main.yml
+
+
+create variables in main.yml file
+tomcat_version: "9.0.102"
+tomcat_install_dir: "/opt/tomcat"
+tomcat_user: "ubuntu"
+tomcat_group: "ubuntu"
+tomcat_url: "https://dlcdn.apache.org/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+create tasks file in main.yaml
+- name: Ensure Tomcat installation directory exists
+  ansible.builtin.file:
+    path: "{{ tomcat_install_dir }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    mode: "0755"
+
+- name: Download Tomcat
+  ansible.builtin.get_url:
+    url: "{{ tomcat_url }}"
+    dest: "/tmp/apache-tomcat.tar.gz"
+    mode: "0644"
+
+- name: Extract Tomcat
+  ansible.builtin.unarchive:
+    src: "/tmp/apache-tomcat.tar.gz"
+    dest: "{{ tomcat_install_dir }}"
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+    mode: "0755"
+
+- name: Copy Tomcat systemd service
+  ansible.builtin.template:
+    src: tomcat.service.j2
+    dest: /etc/systemd/system/tomcat.service
+    mode: "0644"
+  notify: Restart Tomcat
+
+- name: Enable and start Tomcat service
+  ansible.builtin.systemd:
+    name: tomcat
+    state: started
+    enabled: yes
+Create handlers in main.yaml
+- name: Restart Tomcat
+  ansible.builtin.systemd:
+    name: tomcat
+    state: restarted
+    daemon_reload: yes
+
+Create seperate system template in tomcat.service.j2
+[Unit]
+Description=Apache Tomcat Server
+After=network.target
+
+[Service]
+User={{ tomcat_user }}
+Group={{ tomcat_group }}
+Type=forking
+ExecStart={{ tomcat_install_dir }}/bin/startup.sh
+ExecStop={{ tomcat_install_dir }}/bin/shutdown.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+Create inventory file
+[app_servers]
+your-ec2-instance-ip ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/my-key.pem
