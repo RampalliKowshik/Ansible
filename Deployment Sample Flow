@@ -1,0 +1,85 @@
+project where to run two managed nodes and 1 control node on aws ec2 with password less authentication. 1 managed node should be my app server and other is db server. Write a playbook to install and run a 5 variable database on db server.
+Step-1: Launch instance on ubuntu AMI image in AWS
+connect to Control node
+sudo apt update -y && sudo apt install ansible
+
+Step-2: Generate an SSH key 
+ssh-keygen -t rsa
+ls -lah ~/.ssh/    ###lists the ssh key files id_rsa, id_rsa.pub, authorised keys, known_hosts
+cat ~/.ssh/authorized_keys   ### print contents on authorized_keys file
+### Manually echo the id_rsa.pub to authorised_keys_file on to the target nodes for paswword authentication
+
+Step-3: Create an inventory file on Control Node
+vim inventory
+## Inside inventory file list app server and db server along with ssh keys 
+[app_servers]
+Private IP ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+
+[db_servers]
+Private IP ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/id_rsa
+
+[all:vars]
+ansible_python_interpreter=/usr/bin/python3
+
+Step-4: Write an Ansible Playbook to Install, Download, Extract and Start Apache Tomcat
+vim deployment_ansible.yml
+###Inside deployment_ansible playbook write the plays
+- - -
+- name: Install and Start Application Server (Tomcat)
+  hosts: app_servers
+  become: yes
+  tasks:
+    - name: Install Java (Required for Tomcat)
+      ansible.builtin.apt:
+        name: openjdk-11-jdk
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Ensure /opt/tomcat directory exists
+      ansible.builtin.file:
+        path: /opt/tomcat
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Download and extract Tomcat
+      ansible.builtin.unarchive:
+        src: "https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.102/bin/apache-tomcat-9.0.102.tar.gz"
+        dest: /opt/tomcat
+        remote_src: no
+        extra_opts: [--strip-components=1]
+        mode: "0755"
+
+    - name: Start Tomcat server
+      ansible.builtin.command: /opt/tomcat/bin/startup.sh
+      args:
+        chdir: /opt/tomcat
+      async: 45
+      poll: 0
+Save and exit 
+
+Step-5: Run the playbook
+ansible-playbook -i ~/inventory tomcat_playbook.yml
+
+Step-6: Connect to DB server  and install Mysql on it
+ssh -i ~/.ssh/id_rsa ubuntu@Private IP
+sudo apt update -y
+sudo apt install mysql-server -y
+sudo systemctl start mysql
+sudo systemctl enable mysql
+systemctl status mysql
+
+Step-7:  Check if MYSQL is running on DB server from Control Node
+ansible db_servers -i ~/inventory -m shell -a "systemctl status mysql" -b
+ansible db_servers -i ~/inventory -m shell -a "sudo netstat -tulnp | grep mysql" -b
+ansible db_servers -i ~/inventory -m shell -a "mysql -u root -p" -b
+
+Step-8: Check Tomcat is Running on Target Node
+ps aux | grep tomcat
+sudo systemctl status tomcat
+
+Step-9: Find the Tomcat Port
+sudo netstat -tulnp | grep java
+Step-10: Access Tomcat in Browser
+http://<your-ec2-public-ip>:8080
